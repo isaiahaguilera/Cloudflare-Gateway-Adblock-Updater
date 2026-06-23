@@ -61,7 +61,7 @@ blocklists: List[Dict[str, str]] = [
         "name": "Hagezi Pro",
         "url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro-onlydomains.txt",
         "backup_url": "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/pro-onlydomains.txt",
-        "priority": 10000
+        "priority": 20000
     }
 ]
 
