@@ -56,14 +56,26 @@ session.headers.update(headers)
 # Priority order (lower number = higher priority):
 # 1-9999: Reserved for custom policies (Allow Rules, Content Blocking, etc.)
 # 10000+: Hagezi filters (ordered by importance)
-blocklists: List[Dict[str, str]] = [
+# Sources are tried in order. The dnsbunker build mirror publishes every
+# Hagezi build (~3x/day); GitHub, GitLab and jsDelivr publish once a day.
+# All are official mirrors: https://github.com/hagezi/dns-blocklists#mirrors
+blocklists: List[Dict] = [
     {
         "name": "Hagezi Pro",
-        "url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro-onlydomains.txt",
-        "backup_url": "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/pro-onlydomains.txt",
+        "url": "https://hagezi-mirror.dnsbunker.org/wildcard/pro-onlydomains.txt",
+        "backup_urls": [
+            "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro-onlydomains.txt",
+            "https://gitlab.com/hagezi/mirror/-/raw/main/dns-blocklists/wildcard/pro-onlydomains.txt",
+            "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/pro-onlydomains.txt",
+        ],
         "priority": 20000
     }
 ]
+
+
+def source_urls(filter_config: Dict) -> List[str]:
+    """Primary URL followed by any backup URLs, in fallback order."""
+    return [filter_config["url"], *filter_config.get("backup_urls", [])]
 
 # Version tracking functions
 def extract_version_from_description(description: str) -> Optional[str]:
@@ -114,11 +126,9 @@ def build_description_with_version(filter_name: str, list_count: int,
     
     return base_description
 
-def fetch_blocklist_version(url: str, backup_url: Optional[str], filter_name: str) -> Optional[str]:
+def fetch_blocklist_version(urls: List[str], filter_name: str) -> Optional[str]:
     """Fetch blocklist header to extract version using streaming."""
-    for fetch_url in [url, backup_url]:
-        if fetch_url is None:
-            continue
+    for fetch_url in urls:
         try:
             # Use iter_lines to handle gzip/encoding correctly and avoid downloading full file
             with requests.get(fetch_url, timeout=REQUEST_TIMEOUT, stream=True) as response:
@@ -159,11 +169,7 @@ def should_update_filter(filter_config: Dict, cached_rules: List[Dict]) -> tuple
         return True, None, "Version checking disabled"
     
     # Fetch current version from blocklist
-    current_version = fetch_blocklist_version(
-        filter_config['url'],
-        filter_config.get('backup_url'),
-        filter_name
-    )
+    current_version = fetch_blocklist_version(source_urls(filter_config), filter_name)
     
     if not current_version:
         logger.warning(f"  ⚠️ Could not determine version, will update to be safe")
@@ -564,8 +570,6 @@ def process_filter_async(filter_config: Dict, cached_lists: List[Dict],
                         cached_rules: List[Dict]) -> Dict:
     """Process a filter with diff-based updates."""
     filter_name = filter_config["name"]
-    primary_url = filter_config["url"]
-    backup_url = filter_config.get("backup_url")
     list_prefix = f"{filter_name.replace(' ', '_')}_List_"
     policy_name = filter_name
 
@@ -576,9 +580,7 @@ def process_filter_async(filter_config: Dict, cached_lists: List[Dict],
     # Fetch blocklist source
     fetched = False
     content = None
-    for url in [primary_url, backup_url]:
-        if url is None:
-            continue
+    for url in source_urls(filter_config):
         try:
             response = requests.get(url, timeout=REQUEST_TIMEOUT)
             if response.status_code == 200:
