@@ -56,6 +56,8 @@ session.headers.update(headers)
 # Priority order (lower number = higher priority):
 # 1-9999: Reserved for custom policies (Allow Rules, Content Blocking, etc.)
 # 10000+: Hagezi filters (ordered by importance)
+# "priority" is only the initial precedence used when the policy is created.
+# After that, the rule keeps whatever position it has in the dashboard.
 # Sources are tried in order. The dnsbunker build mirror publishes every
 # Hagezi build (~3x/day); GitHub, GitLab and jsDelivr publish once a day.
 # All are official mirrors: https://github.com/hagezi/dns-blocklists#mirrors
@@ -194,14 +196,8 @@ def should_update_filter(filter_config: Dict, cached_rules: List[Dict]) -> tuple
         logger.info(f"  🔔 Version changed: {cached_version} → {current_version}")
         return True, current_version, "Version changed"
     
-    # Check if precedence matches
-    target_precedence = filter_config.get('priority')
-    current_precedence = policy.get('precedence')
-    
-    if target_precedence is not None and current_precedence != target_precedence:
-        logger.info(f"  ⚠️ Precedence mismatch: {current_precedence} (current) ≠ {target_precedence} (target)")
-        return True, current_version, f"Precedence mismatch ({current_precedence} -> {target_precedence})"
-    
+    # Precedence is intentionally not enforced here: it is only set when the
+    # policy is created, so the rule can be reordered in the dashboard.
     logger.info(f"  ⏭️ Version unchanged ({current_version}), skipping update")
     return False, current_version, "Version unchanged"
 
@@ -548,8 +544,11 @@ def update_policy_for_filter(filter_config: Dict, final_list_ids: List[str],
 
     # Check if policy exists to determine POST or PUT
     existing_policy = next((rule for rule in cached_rules if rule['name'] == policy_name), None)
-    
+
     if existing_policy:
+        # Keep the rule wherever it was placed in the dashboard; the
+        # configured priority only applies when the policy is first created.
+        policy_payload["precedence"] = existing_policy.get("precedence", priority)
         logger.info(f"✍️ Updating existing policy '{policy_name}'...")
         async def run_update():
              # Create a new session for this operation
